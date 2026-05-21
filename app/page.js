@@ -155,7 +155,7 @@ function minimax(board, depth, alpha, beta, maxing, turn, ep, castling) {
   }
 }
 
-const AI_CFG = { Beginner:{depth:1,noise:160}, Intermediate:{depth:2,noise:30}, Advanced:{depth:3,noise:0} };
+const AI_CFG = { Beginner:{depth:1,noise:160}, Intermediate:{depth:1,noise:20}, Advanced:{depth:2,noise:0} };
 
 function getAIMove(board, turn, ep, castling, level) {
   const {depth,noise} = AI_CFG[level]??AI_CFG.Intermediate;
@@ -302,46 +302,54 @@ export default function ChessMentorAI() {
   useEffect(()=>{playerSideRef.current=playerSide;},[playerSide]);
   useEffect(()=>{gameOverRef.current=gameOver;},[gameOver]);
 
-  // ── AI move effect — fires whenever turn changes
+  // ── AI move effect — fires whenever turn or playerSide changes
   useEffect(()=>{
-    // Only fire when it's NOT the player's turn
-    if (!playerSide) return;
-    if (gs.turn === playerSide) return;
+    if (!playerSide) return;           // no side chosen yet
+    if (gs.turn === playerSide) return; // it's the human's turn
     if (gameOver) return;
 
+    let cancelled = false;
     setAiThinking(true);
-    const delay = {Beginner:500,Intermediate:700,Advanced:1000}[level]??700;
 
-    const t = setTimeout(()=>{
-      const cur  = gsRef.current;
-      const cr   = castlingRef.current;
-      const epSq = epRef.current;
-      const lv   = levelRef.current;
+    // First setTimeout: let React paint the "Thinking..." UI
+    const t1 = setTimeout(()=>{
+      // Second setTimeout(0): yield to browser before heavy computation
+      const t2 = setTimeout(()=>{
+        if (cancelled) return;
 
-      // Double-check nothing changed while we were waiting
-      if (gameOverRef.current) { setAiThinking(false); return; }
-      if (cur.turn === playerSideRef.current) { setAiThinking(false); return; }
+        const cur  = gsRef.current;
+        const cr   = castlingRef.current;
+        const epSq = epRef.current;
+        const lv   = levelRef.current;
 
-      const move = getAIMove(cur.board, cur.turn, epSq, cr, lv);
-      setAiThinking(false);
+        if (gameOverRef.current || cur.turn === playerSideRef.current) {
+          setAiThinking(false); return;
+        }
 
-      if (!move) { setGameOver("stalemate"); return; }
+        const move = getAIMove(cur.board, cur.turn, epSq, cr, lv);
+        if (cancelled) return;
 
-      const {from, to} = move;
-      const piece = cur.board[sqIdx(from)];
-      const nb    = applyMove(cur.board, from, to, cur.turn);
-      const next  = cur.turn==="w"?"b":"w";
-      const newCr = updateCastling(cr, piece, from, to);
+        setAiThinking(false);
+        if (!move) { setGameOver("stalemate"); return; }
 
-      setCastling(newCr);
-      setEp("-");
-      if (next==="w") setFullMove(f=>f+1);
-      setGs({...cur, board:nb, turn:next});
-      setLastMove({from,to});
-      setHistory(h=>[...h,`${GLYPHS[piece]??""} ${from}→${to}`]);
-    }, delay);
+        const {from, to} = move;
+        const piece = cur.board[sqIdx(from)];
+        const nb    = applyMove(cur.board, from, to, cur.turn);
+        const next  = cur.turn==="w"?"b":"w";
+        const newCr = updateCastling(cr, piece, from, to);
 
-    return ()=>clearTimeout(t);
+        setCastling(newCr);
+        setEp("-");
+        if (next==="w") setFullMove(f=>f+1);
+        setGs({...cur, board:nb, turn:next});
+        setLastMove({from,to});
+        setHistory(h=>[...h,`${GLYPHS[piece]??""} ${from}→${to}`]);
+      }, 0);
+
+      return ()=>clearTimeout(t2);
+    }, 300);
+
+    return ()=>{ cancelled=true; clearTimeout(t1); };
   }, [gs.turn, playerSide, gameOver]);
 
   // ── Player move handler
